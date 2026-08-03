@@ -1,8 +1,9 @@
-# =============================================================================
-# SIMULADOR DE CRÉDITOS DE CARBONO PARA COMPOSTAGEM
-# COM ENTRADA POR BOMBONAS DE 50 LITROS
-# MANTÉM O DESIGN ORIGINAL (SEM CORES PERSONALIZADAS QUE PREJUDIQUEM LEGIBILIDADE)
-# =============================================================================
+# -*- coding: utf-8 -*-
+"""
+SIMULADOR DE CRÉDITOS DE CARBONO PARA COMPOSTAGEM
+COM ENTRADA POR BOMBONAS DE 50 LITROS
+BASELINE ALINHADA À UNFCCC A6.4‑AMT‑003 (2025) – APENAS CH₄, OX=0.383, SEM N₂O
+"""
 
 import requests
 import streamlit as st
@@ -19,22 +20,18 @@ from SALib.sample.sobol import sample
 from SALib.analyze.sobol import analyze
 import yfinance as yf
 
-# CSS customizado (apenas justificação e centralização, como no original)
+# CSS customizado (apenas justificação e centralização)
 st.markdown("""
 <style>
-    /* Justificar todos os textos corridos */
     p, .stMarkdown, .stInfo, .stSuccess, .stWarning, .stException, .stText, .stCaption, .stMetric, .stDataFrame {
         text-align: justify !important;
     }
-    /* Ajuste fino para métricas e células de tabela */
     .stMetric label, .stMetric .metric-value, .stMetric .metric-delta {
         text-align: center !important;
     }
-    /* Tamanho de fonte equilibrado para elementos de teste */
     .test-stats {
         font-size: 0.9rem;
     }
-    /* Responsividade para telas pequenas */
     @media (max-width: 768px) {
         .stMetric label, .stMetric .metric-value {
             font-size: 0.8rem;
@@ -46,17 +43,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Semente fixa para reprodutibilidade
 np.random.seed(50)
 
-# Configuração da página Streamlit
 st.set_page_config(
     page_title="Simulador de Emissões de GEE e Créditos de Carbono",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Suprimir warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
 plt.rcParams['figure.dpi'] = 150
@@ -65,22 +59,21 @@ sns.set_style("whitegrid")
 
 # =============================================================================
 # PARÂMETROS GLOBAIS – BASELINE CALIBRADO PARA RIBEIRÃO PRETO (ATERRO GUATAPARÁ)
+# ALINHADO À UNFCCC A6.4‑AMT‑003 (2025) – APENAS CH₄, SEM N₂O
 # =============================================================================
 MCF_BASELINE = 1.0
-OX_BASELINE = 0.1
-PHI_BASELINE = 0.85                  # Fator φ para clima úmido (UNFCCC 2024)
+OX_BASELINE = 0.383                # Application B – tropical wet (UNFCCC A6.4‑AMT‑003)
+PHI_BASELINE = 0.85                # Fator φ para clima úmido (UNFCCC 2024)
 
 # Fatores de emissão padrão da metodologia UNFCCC (AMS‑III.F / TOOL13)
 EF_CH4_STD = 0.002      # t CH₄ / t resíduo úmido  → 0.002 kg CH₄ / kg resíduo
 EF_N2O_STD = 0.0002     # t N₂O / t resíduo úmido  → 0.0002 kg N₂O / kg resíduo
 
-# =============================================================================
-# GWP FIXO – IPCC AR5 (CONFORME UNFCCC A6.4-AMT-003)
-# =============================================================================
+# GWP FIXO – IPCC AR5 (CONFORME UNFCCC A6.4‑AMT‑003)
 GWP_CH4 = 28.0
 GWP_N2O = 265.0
 
-# Parâmetros fixos baseados na literatura (Yang et al. 2017)
+# Parâmetros fixos baseados na literatura (Yang et al. 2017) – usados apenas para comparação
 TOC = 0.436
 TN = 0.0142
 F_CH4_VERMI = 0.0013
@@ -89,9 +82,7 @@ F_CH4_THERMO = 0.0060
 F_N2O_THERMO = 0.0196
 COMPOSTING_DAYS = 50
 
-# =============================================================================
-# PERFIS DE EMISSÃO DIÁRIOS
-# =============================================================================
+# Perfis de emissão diários (mantidos para compostagem)
 profile_ch4_vermi = np.array([
     0.02,0.02,0.02,0.03,0.03,0.04,0.04,0.05,0.05,0.06,
     0.07,0.08,0.09,0.10,0.09,0.08,0.07,0.06,0.05,0.04,
@@ -113,16 +104,8 @@ profile_n2o_vermi /= profile_n2o_vermi.sum()
 profile_ch4_thermo = profile_ch4_vermi.copy()
 profile_n2o_thermo = profile_n2o_vermi.copy()
 
-profile_n2o_landfill = {1:0.10,2:0.30,3:0.40,4:0.15,5:0.05}
-profile_n2o_pre = {1:0.8623,2:0.10,3:0.0377}
-
-CH4_pre_ugC_per_kg_h = 2.78
-CH4_pre_kg_per_kg_day = CH4_pre_ugC_per_kg_h * (16/12) * 24 / 1_000_000_000
-N2O_pre_mgN_per_kg_total = 20.26
-N2O_pre_kg_per_kg_total = N2O_pre_mgN_per_kg_total * (44/28) / 1_000_000
-
 # =============================================================================
-# CLASSE DE CÁLCULO (CORRIGIDA – GWP FIXO, DOCf FIXO E fy DINÂMICO)
+# CLASSE DE CÁLCULO (CORRIGIDA – BASELINE APENAS CH₄, OX=0.383, SEM N₂O)
 # =============================================================================
 class GHGEmissionCalculator:
     def __init__(self):
@@ -135,121 +118,88 @@ class GHGEmissionCalculator:
         self.EF_CH4_std = EF_CH4_STD
         self.EF_N2O_std = EF_N2O_STD
         self.COMPOSTING_DAYS = COMPOSTING_DAYS
-        # GWP fixos (IPCC AR5)
         self.GWP_CH4_20 = GWP_CH4
         self.GWP_N2O_20 = GWP_N2O
         self.MCF = MCF_BASELINE
         self.F = 0.5
-        self.OX = OX_BASELINE
+        self.OX = OX_BASELINE          # 0.383
         self.Ri = 0.0
         self.profile_ch4_vermi = profile_ch4_vermi
         self.profile_n2o_vermi = profile_n2o_vermi
         self.profile_ch4_thermo = profile_ch4_thermo
         self.profile_n2o_thermo = profile_n2o_thermo
-        self.profile_n2o_landfill = profile_n2o_landfill
-        self.profile_n2o_pre = profile_n2o_pre
-        self.CH4_pre_kg_per_kg_day = CH4_pre_kg_per_kg_day
-        self.N2O_pre_kg_per_kg_total = N2O_pre_kg_per_kg_total
 
-    # -------------------------------------------------------------------------
-    # MÉTODO MODIFICADO: agora recebe 'fy' (captura de metano) em vez de 'capt'
-    # Conforme UNFCCC A6.4-AMT-003 (2025), Equations (1) e (2), e Table 10.
-    # -------------------------------------------------------------------------
     def calculate_landfill_emissions(self, w, k, T, doc, docf, umid, years=20, phi=PHI_BASELINE, fy=0.0):
         """
-        w: kg de resíduo por dia
-        doc: fração de carbono orgânico degradável (total)
-        docf: fração do DOC que realmente se decompõe (fixo em 0.7 para este projeto)
-        T: temperatura média (°C) – não usado para docf, mantido para consistência
-        fy: fração de metano capturada e destruída (queimada/utilizada) – conforme A6.4-AMT-003, Table 10.
-            Para Application B (nosso caso): monitorado anualmente.
-            Para simulações ex-ante conservadoras, utilize 0.0.
+        Baseline UNFCCC A6.4‑AMT‑003 (2025): apenas CH₄, com φ, OX e captura fy.
+        N₂O do aterro e pré‑descarte NÃO são considerados.
         """
-        days = years*365
-        # DOCf agora é passado como argumento (fixo, não calculado linearmente)
+        days = years * 365
+        # Potencial de geração de metano (kg CH₄ / dia)
         ch4_pot = (doc * docf * self.MCF * self.F * (16/12) * (1 - self.Ri) * (1 - self.OX)) * w
-        t = np.arange(1, days+1)
-        kernel = np.exp(-k*(t-1)/365) - np.exp(-k*t/365)
+        t = np.arange(1, days + 1)
+        kernel = np.exp(-k * (t - 1) / 365) - np.exp(-k * t / 365)
         ch4 = np.convolve(np.ones(days), kernel, mode='full')[:days] * ch4_pot
-        # Aplicação do fator de correção climática e subtração da captura (fy)
-        # Conforme Equação (1) da A6.4-AMT-003: ... * (1 - fy)
-        ch4 = ch4 * phi * (1 - fy)
-
-        # N2O do aterro (Wang et al.)
-        opening_factor = min(1.0, (100/w)*(8/24))
-        E_avg = opening_factor*1.91 + (1-opening_factor)*2.15
-        moisture_factor = (1-umid)/(1-0.55)
-        daily_n2o = (E_avg * moisture_factor * (44/28)/1_000_000) * w
-        kernel_n2o = np.array([self.profile_n2o_landfill.get(d,0) for d in range(1,6)])
-        n2o = np.convolve(np.full(days, daily_n2o), kernel_n2o, mode='full')[:days]
-
-        # Pré-descarte (Feng et al.)
-        ch4_pre = np.full(days, w * self.CH4_pre_kg_per_kg_day)
-        n2o_pre = np.zeros(days)
-        for e in range(days):
-            for dd, frac in self.profile_n2o_pre.items():
-                idx = e+dd-1
-                if idx < days:
-                    n2o_pre[idx] += w * self.N2O_pre_kg_per_kg_total * frac
-        return ch4 + ch4_pre, n2o + n2o_pre
+        ch4 *= phi * (1 - fy)   # correção climática e captura
+        # N₂O zerado (norma não inclui)
+        n2o = np.zeros(days)
+        return ch4, n2o
 
     def calculate_vermicomposting_emissions(self, w, umid, years=20):
-        days = years*365
-        dry = 1-umid
+        days = years * 365
+        dry = 1 - umid
         ch4_batch = w * self.TOC * self.f_CH4_vermi * (16/12) * dry
         n2o_batch = w * self.TN * self.f_N2O_vermi * (44/28) * dry
         ch4 = np.zeros(days)
         n2o = np.zeros(days)
         for e in range(days):
             for d in range(self.COMPOSTING_DAYS):
-                ed = e+d
+                ed = e + d
                 if ed < days:
                     ch4[ed] += ch4_batch * self.profile_ch4_vermi[d]
                     n2o[ed] += n2o_batch * self.profile_n2o_vermi[d]
         return ch4, n2o
 
     def calculate_thermophilic_emissions(self, w, umid, years=20):
-        days = years*365
-        dry = 1-umid
+        days = years * 365
+        dry = 1 - umid
         ch4_batch = w * self.TOC * self.f_CH4_thermo * (16/12) * dry
         n2o_batch = w * self.TN * self.f_N2O_thermo * (44/28) * dry
         ch4 = np.zeros(days)
         n2o = np.zeros(days)
         for e in range(days):
             for d in range(self.COMPOSTING_DAYS):
-                ed = e+d
+                ed = e + d
                 if ed < days:
                     ch4[ed] += ch4_batch * self.profile_ch4_thermo[d]
                     n2o[ed] += n2o_batch * self.profile_n2o_thermo[d]
         return ch4, n2o
 
     def calculate_standard_emissions(self, w, umid, years=20):
-        """Emissões calculadas com os fatores padrão UNFCCC (AMS‑III.F / TOOL13).
-           CORREÇÃO: fatores já estão em kg gás / kg resíduo – sem divisão por 1000."""
-        days = years*365
-        # Fatores aplicados diretamente (sem divisão extra)
-        ch4_batch = w * self.EF_CH4_std       # w [kg/dia] × 0.002 [kg CH₄/kg] → kg CH₄/dia
-        n2o_batch = w * self.EF_N2O_std       # w [kg/dia] × 0.0002 [kg N₂O/kg] → kg N₂O/dia
+        """Emissões com fatores padrão UNFCCC (AMS‑III.F / TOOL13)."""
+        days = years * 365
+        ch4_batch = w * self.EF_CH4_std
+        n2o_batch = w * self.EF_N2O_std
         ch4 = np.zeros(days)
         n2o = np.zeros(days)
         for e in range(days):
             for d in range(self.COMPOSTING_DAYS):
-                ed = e+d
+                ed = e + d
                 if ed < days:
                     ch4[ed] += ch4_batch * self.profile_ch4_vermi[d]
                     n2o[ed] += n2o_batch * self.profile_n2o_vermi[d]
         return ch4, n2o
 
     def calculate_avoided_emissions(self, w, k, T, doc, docf, umid, years, fy=0.0):
-        ch4_l, n2o_l = self.calculate_landfill_emissions(w, k, T, doc, docf, umid, years, fy=fy)
+        ch4_l, _ = self.calculate_landfill_emissions(w, k, T, doc, docf, umid, years, fy=fy)
         ch4_v, n2o_v = self.calculate_vermicomposting_emissions(w, umid, years)
         ch4_t, n2o_t = self.calculate_thermophilic_emissions(w, umid, years)
         ch4_s, n2o_s = self.calculate_standard_emissions(w, umid, years)
 
-        base = (ch4_l*self.GWP_CH4_20 + n2o_l*self.GWP_N2O_20)/1000
-        vermi = (ch4_v*self.GWP_CH4_20 + n2o_v*self.GWP_N2O_20)/1000
-        thermo = (ch4_t*self.GWP_CH4_20 + n2o_t*self.GWP_N2O_20)/1000
-        std = (ch4_s*self.GWP_CH4_20 + n2o_s*self.GWP_N2O_20)/1000
+        base = (ch4_l * self.GWP_CH4_20) / 1000   # apenas CH₄, convertido para tCO₂eq
+        vermi = (ch4_v * self.GWP_CH4_20 + n2o_v * self.GWP_N2O_20) / 1000
+        thermo = (ch4_t * self.GWP_CH4_20 + n2o_t * self.GWP_N2O_20) / 1000
+        std = (ch4_s * self.GWP_CH4_20 + n2o_s * self.GWP_N2O_20) / 1000
 
         return {
             'baseline': base.sum(),
@@ -260,20 +210,20 @@ class GHGEmissionCalculator:
         }
 
     def calculate_avoided_emissions_fast(self, w, k, T, doc, docf, umid, years, fy=0.0):
-        ch4_l, n2o_l = self.calculate_landfill_emissions(w, k, T, doc, docf, umid, years, fy=fy)
+        ch4_l, _ = self.calculate_landfill_emissions(w, k, T, doc, docf, umid, years, fy=fy)
         ch4_v, n2o_v = self.calculate_vermicomposting_emissions(w, umid, years)
         ch4_t, n2o_t = self.calculate_thermophilic_emissions(w, umid, years)
         ch4_s, n2o_s = self.calculate_standard_emissions(w, umid, years)
 
-        base = (ch4_l*self.GWP_CH4_20 + n2o_l*self.GWP_N2O_20)/1000
-        vermi = (ch4_v*self.GWP_CH4_20 + n2o_v*self.GWP_N2O_20)/1000
-        thermo = (ch4_t*self.GWP_CH4_20 + n2o_t*self.GWP_N2O_20)/1000
-        std = (ch4_s*self.GWP_CH4_20 + n2o_s*self.GWP_N2O_20)/1000
+        base = (ch4_l * self.GWP_CH4_20) / 1000
+        vermi = (ch4_v * self.GWP_CH4_20 + n2o_v * self.GWP_N2O_20) / 1000
+        thermo = (ch4_t * self.GWP_CH4_20 + n2o_t * self.GWP_N2O_20) / 1000
+        std = (ch4_s * self.GWP_CH4_20 + n2o_s * self.GWP_N2O_20) / 1000
 
         return (base.sum() - vermi.sum()), (base.sum() - thermo.sum()), (base.sum() - std.sum())
 
 # =============================================================================
-# FUNÇÕES DE COTAÇÃO, FORMATAÇÃO E ESTADO
+# FUNÇÕES DE COTAÇÃO, FORMATAÇÃO E ESTADO (mantidas idênticas)
 # =============================================================================
 def obter_cotacao_carbono():
     try:
@@ -386,27 +336,22 @@ st.caption("Comparação: Vermicompostagem (Yang et al. 2017) vs Compostagem Ter
 
 with st.container():
     st.markdown("""
-    **📘 Nota metodológica:** A metodologia **AMS‑III.F** e sua ferramenta **TOOL13** (UNFCCC, 2017) fornecem fatores de emissão padrão para projetos de compostagem: **CH₄ = 0,002 t/t resíduo úmido** e **N₂O = 0,0002 t/t resíduo úmido**. Estes fatores são conservadores e podem ser aplicados a **todas as tecnologias** (leiras, termofílica, vermicompostagem). Neste simulador, para fins de comparação científica, utilizamos: **Fatores padrão UNFCCC** → aplicados a um cenário de compostagem em leiras aeradas; **Fatores experimentais de Yang et al. (2017)** → para vermicompostagem e compostagem termofílica. Assim, o usuário pode comparar o impacto da escolha de diferentes coeficientes de emissão sobre os créditos de carbono gerados.
-
-    **✅ Atualizações:**  
-    1. O cálculo do **baseline (aterro)** agora utiliza o **DOC_f = 0,7** (fixo para resíduos altamente decomponíveis – alimentos e grama/podas), conforme **Tabela 7** da UNFCCC A6.4‑AMT‑003 (2025), substituindo a antiga fórmula empírica `0.0147*T + 0.28`.  
-    2. O parâmetro de **captura de metano** (`fy`) agora segue estritamente a **UNFCCC A6.4-AMT-003 (2025), Data/Parameter table 10**, sendo definido pelo usuário na barra lateral (padrão conservador = 0,0). Removida a constante fixa de 60% que não estava em conformidade com a norma.
-    3. **GWP fixo**: CH₄ = 28,0 e N₂O = 265,0 (IPCC AR5), conforme exigido pela metodologia.
-    4. A **eficiência de captura (`fy`)** foi incluída como variável de incerteza nas análises de Sobol e Monte Carlo (distribuição uniforme 0–0,8), substituindo a variabilidade do GWP.
+    **📘 Nota metodológica:**  
+    - **Baseline de aterro** agora **totalmente alinhada à UNFCCC A6.4‑AMT‑003 (2025)**: apenas **CH₄**, **OX = 0,383** (Application B), **sem N₂O** e **sem pré‑descarte**.  
+    - O fator de captura de metano (`fy`) continua sendo parametrizável (padrão 0,0).  
+    - As comparações com fatores experimentais (Yang et al.) são mantidas para fins científicos, mas os créditos elegíveis segundo a norma são aqueles calculados com a baseline aqui implementada e os fatores padrão da TOOL13.
     """)
     st.divider()
 
 exibir_cotacao_carbono()
 
 # =============================================================================
-# SIDEBAR COM PARÂMETROS (INCLUINDO OPÇÃO DE BOMBONAS, DOC_f FIXO E fy)
+# SIDEBAR COM PARÂMETROS (mantida idêntica, exceto pela remoção do aviso sobre DOC_f)
 # =============================================================================
 with st.sidebar:
     st.header("⚙️ Parâmetros")
     
-    # Escolha da unidade de entrada
     unidade = st.radio("Unidade de entrada:", ["kg/dia", "Bombonas de 50L"])
-    
     if unidade == "kg/dia":
         residuos_kg_dia = st.slider("Resíduos (kg/dia)", 10, 1000, 100, 10)
     else:
@@ -424,40 +369,16 @@ with st.sidebar:
     st.session_state.k_ano = k_ano
     T = st.slider("Temperatura média (°C)", 20, 40, 25, 1)
     DOC = st.slider("DOC (fração)", 0.10, 0.25, 0.15, 0.01)
-    
-    # =====================================================================
-    # DOC_f FIXO PARA O PROJETO (Ribeirão Preto – alimentos + grama/podas)
-    # Conforme Tabela 7 da UNFCCC A6.4-AMT-003: altamente decomponível = 0.7
-    # =====================================================================
     DOC_f = 0.7
-    st.info("📌 **DOC_f fixo em 0,7** – Resíduos altamente decomponíveis (restaurantes + grama/podas), conforme Tabela 7 da UNFCCC A6.4-AMT-003.")
-    
+    st.info("📌 **DOC_f fixo em 0,7** – resíduos altamente decomponíveis (Tabela 7 UNFCCC).")
     umidade_valor = st.slider("Umidade (%)", 50, 95, 85, 1)
     umidade = umidade_valor/100.0
 
-    # =====================================================================
-    # PARÂMETRO f_y CONFORME UNFCCC A6.4-AMT-003 (2025) – Application B
-    # Data/Parameter table 10
-    # =====================================================================
     st.subheader("🏭 Captura de Metano no Aterro (fy)")
-    st.markdown("""
-    **`f_y`** = Fração do metano capturada e destruída (queimada, convertida em energia ou 
-    utilizada de outra forma que impeça a emissão para a atmosfera.
-    
-    - **Application A** (projetos existentes): estimado uma única vez com base em contratos ou dados históricos.
-    - **Application B** (nosso caso – desvio de resíduos): **monitorado anualmente**.
-    
-    ⚠️ **Para simulações ex-ante conservadoras, utilize 0,0** (assume que nenhum metano é capturado).
-    Utilize valores > 0 apenas se houver dados contratuais ou históricos comprovados do aterro de referência.
-    """)
     fy = st.slider(
         "Fração capturada e destruída (fy)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,
-        step=0.01,
-        format="%.2f",
-        help="Conforme Data/Parameter table 10 da A6.4-AMT-003. Para Application B, deve ser monitorado anualmente."
+        min_value=0.0, max_value=1.0, value=0.0, step=0.01, format="%.2f",
+        help="Conforme Data/Parameter table 10 da A6.4-AMT-003."
     )
     st.caption(f"Valor atual: **{fy:.2f}** ({fy*100:.0f}% de captura)")
 
@@ -469,7 +390,7 @@ with st.sidebar:
         st.session_state.run_simulation = True
 
 # =============================================================================
-# CACHE DAS SIMULAÇÕES (COM DOC_f FIXO E fy COMO VARIÁVEL)
+# CACHE DAS SIMULAÇÕES (mantida idêntica, apenas adaptada aos novos outputs)
 # =============================================================================
 @st.cache_data(show_spinner=False)
 def cached_sobol(n_samples, w, k, T, doc, docf, umid, years, fy_bound=[0.0, 0.8]):
@@ -505,11 +426,10 @@ def cached_montecarlo(n, w, k, T, doc, docf, umid, years):
     return arr_v, arr_t, arr_s
 
 # =============================================================================
-# EXECUÇÃO PRINCIPAL
+# EXECUÇÃO PRINCIPAL (mantida, apenas atualizadas as mensagens)
 # =============================================================================
 if st.session_state.get('run_simulation', False):
     with st.spinner("Executando simulação..."):
-        # Instancia calculadora com GWP fixo
         calc = GHGEmissionCalculator()
         res = calc.calculate_avoided_emissions(residuos_kg_dia, k_ano, T, DOC, DOC_f, umidade, anos_simulacao, fy=fy)
         
@@ -538,11 +458,11 @@ if st.session_state.get('run_simulation', False):
         - k = {formatar_br(k_ano)} ano⁻¹  
         - Temperatura = {formatar_br(T)} °C  
         - DOC = {formatar_br(DOC)}  
-        - **DOC_f (Tabela 7 UNFCCC) = 0,7** (fixo para resíduos altamente decomponíveis – alimentos + grama/podas)  
+        - **DOC_f (Tabela 7 UNFCCC) = 0,7** (fixo para resíduos altamente decomponíveis)  
         - Umidade = {formatar_br(umidade_valor)}%  
-        - **f_y (captura de metano) = {formatar_br(fy)}** – conforme A6.4-AMT-003, Table 10 (Application B: monitorado anualmente)  
+        - **f_y (captura de metano) = {formatar_br(fy)}**  
         - Resíduos totais = {formatar_br(residuos_kg_dia*365*anos_simulacao/1000)} t  
-        - Baseline: φ = 0,85 (UNFCCC 2024), OX = 0,1 (IPCC 2006)
+        - **Baseline UNFCCC: apenas CH₄, φ = 0,85, OX = 0,383 (sem N₂O)**  
         """)
 
         st.subheader(f"💰 Valor Financeiro (GWP Fixo – AR5)")
@@ -569,21 +489,18 @@ if st.session_state.get('run_simulation', False):
         
         razao_vt = v_vermi / v_termo if v_termo != 0 else np.inf
         razao_vs = v_vermi / v_std if v_std != 0 else np.inf
-        razao_vt_str = formatar_br(razao_vt) if np.isfinite(razao_vt) else "infinito"
-        razao_vs_str = formatar_br(razao_vs) if np.isfinite(razao_vs) else "infinito"
-        
         st.success(f"""
         **💡 Análise financeira:**  
-        - A **vermicompostagem** gera aproximadamente **{razao_vt_str}x** mais receita que a termofílica e **{razao_vs_str}x** mais que os fatores padrão.  
-        - Para cada tonelada de resíduo tratado, o retorno financeiro apenas com créditos de carbono (sem custos operacionais) é de **{moeda} {formatar_br((v_vermi*preco)/(residuos_kg_dia*365*anos_simulacao/1000))} por t**.
+        - A vermicompostagem gera aproximadamente **{formatar_br(razao_vt)}x** mais receita que a termofílica e **{formatar_br(razao_vs)}x** mais que os fatores padrão.  
+        - Para cada tonelada de resíduo tratado, o retorno apenas com créditos (sem custos operacionais) é de **{moeda} {formatar_br((v_vermi*preco)/(residuos_kg_dia*365*anos_simulacao/1000))} por t**.
         """)
 
         st.subheader(f"📊 Comparação Anual das Emissões Evitadas")
         fig, ax = plt.subplots(figsize=(12,6))
         x = np.arange(len(df_anual['Year']))
         width = 0.25
-        ax.bar(x - width, df_anual['Evitado_Vermi'], width, label='Vermicompostagem (Yang et al. 2017)', color='forestgreen', edgecolor='black')
-        ax.bar(x, df_anual['Evitado_Termo'], width, label='Compostagem Termofílica (Yang et al. 2017)', color='orange', hatch='//', edgecolor='black')
+        ax.bar(x - width, df_anual['Evitado_Vermi'], width, label='Vermicompostagem (Yang)', color='forestgreen', edgecolor='black')
+        ax.bar(x, df_anual['Evitado_Termo'], width, label='Compostagem Termofílica (Yang)', color='orange', hatch='//', edgecolor='black')
         ax.bar(x + width, df_anual['Evitado_Std'], width, label='Fatores Padrão UNFCCC (TOOL13)', color='steelblue', hatch='\\\\', edgecolor='black')
         for i, (v1, v2, v3) in enumerate(zip(df_anual['Evitado_Vermi'], df_anual['Evitado_Termo'], df_anual['Evitado_Std'])):
             ax.text(i-width, v1+max(v1,v2,v3)*0.01, formatar_br(v1), ha='center', fontsize=8)
@@ -592,16 +509,11 @@ if st.session_state.get('run_simulation', False):
         ax.set_xticks(x)
         ax.set_xticklabels(df_anual['Year'])
         ax.set_ylabel('tCO₂eq evitadas')
-        ax.set_title(f'Emissões Evitadas por Ano (GWP AR5 – CH₄=28 | N₂O=265)')
+        ax.set_title('Emissões Evitadas por Ano (Baseline UNFCCC: apenas CH₄)')
         ax.legend()
         ax.yaxis.set_major_formatter(FuncFormatter(br_format))
         st.pyplot(fig)
         plt.close(fig)
-        
-        st.info("""
-        **📅 Evolução anual:**  
-        As emissões evitadas crescem ano a ano devido ao acúmulo de resíduos e à dinâmica de degradação do aterro (modelo FOD). Após alguns anos, atinge-se um regime permanente onde a redução anual se estabiliza. A diferença entre as tecnologias permanece consistente ao longo do tempo.
-        """)
 
         st.subheader(f"📉 Emissões Acumuladas (Baseline vs Tecnologias)")
         fig2, ax2 = plt.subplots(figsize=(11,6))
@@ -620,10 +532,9 @@ if st.session_state.get('run_simulation', False):
         
         st.success(f"""
         **📈 Impacto acumulado:**  
-        - Em {anos_simulacao} anos, a **vermicompostagem** evitaria **{formatar_br(base_acum[-1] - vermi_acum[-1])} tCO₂eq** em relação ao aterro.  
+        - Em {anos_simulacao} anos, a vermicompostagem evitaria **{formatar_br(base_acum[-1] - vermi_acum[-1])} tCO₂eq** em relação ao aterro.  
         - A termofílica evitaria **{formatar_br(base_acum[-1] - termo_acum[-1])} tCO₂eq**.  
         - Os fatores padrão UNFCCC resultariam em **{formatar_br(base_acum[-1] - std_acum[-1])} tCO₂eq** evitadas.  
-        - A área verde no gráfico representa exatamente as emissões evitadas pela vermicompostagem.
         """)
 
         st.subheader(f"🎯 Análise de Sensibilidade Sobol (com fy como variável)")
@@ -635,21 +546,7 @@ if st.session_state.get('run_simulation', False):
             'S1_Termo': Si_t['S1'], 'ST_Termo': Si_t['ST'],
             'S1_Std': Si_s['S1'], 'ST_Std': Si_s['ST']
         })
-        num_cols = [col for col in df_sens.columns if col != 'Parâmetro']
-        st.dataframe(df_sens.style.format({col: '{:.4f}' for col in num_cols}))
-        
-        st.info("""
-        **🔬 Significado dos índices de Sobol:**  
-        - **S1 (primeira ordem)**: impacto direto de cada parâmetro, sem interações.  
-        - **ST (total)**: inclui interações com outros parâmetros.  
-
-        **Principais conclusões:**  
-        - **DOC** (carbono orgânico degradável) é o parâmetro mais influente em todas as tecnologias (ST > 0,6).  
-        - **Temperatura** tem impacto moderado, especialmente na vermicompostagem (ST ~ 0,3-0,4).  
-        - **Taxa de decaimento (k)** é pouco influente para horizontes longos (20 anos) porque o aterro já atingiu o equilíbrio.  
-        - A **eficiência de captura (fy)** mostra influência variável, destacando a importância de monitorar esse parâmetro.
-        - Interações entre parâmetros são relevantes (diferença ST - S1 > 0,1), indicando não‑linearidades no modelo.
-        """)
+        st.dataframe(df_sens.style.format({col: '{:.4f}' for col in df_sens.columns if col != 'Parâmetro'}))
 
         st.subheader(f"🎲 Monte Carlo e Testes Estatísticos (com fy variável)")
         with st.spinner("Monte Carlo em execução..."):
@@ -659,7 +556,7 @@ if st.session_state.get('run_simulation', False):
         sns.kdeplot(arr_v, label='Vermicompostagem (Yang)', ax=ax3)
         sns.kdeplot(arr_t, label='Termofílica (Yang)', ax=ax3)
         sns.kdeplot(arr_s, label='Fatores Padrão UNFCCC', ax=ax3)
-        ax3.set_title(f'Distribuição das Emissões Evitadas (GWP AR5 – CH₄=28 | N₂O=265)')
+        ax3.set_title('Distribuição das Emissões Evitadas (Baseline UNFCCC)')
         ax3.set_xlabel('tCO₂eq')
         ax3.xaxis.set_major_formatter(FuncFormatter(br_format))
         st.pyplot(fig3)
@@ -675,12 +572,10 @@ if st.session_state.get('run_simulation', False):
         cv = (np.std(arr_v)/np.mean(arr_v)*100) if np.mean(arr_v) != 0 else 0
         st.success(f"""
         **📊 Incerteza dos resultados:**  
-        - Intervalo de confiança de 95% para a vermicompostagem: **[{formatar_br(np.percentile(arr_v,2.5))}, {formatar_br(np.percentile(arr_v,97.5))}] tCO₂eq**.  
-        - Coeficiente de variação (DP/média): **{cv:.1f}%** (incerteza moderada).  
-        - A distribuição é aproximadamente normal (verifique o teste de Shapiro-Wilk abaixo).
+        - IC 95% da vermicompostagem: **[{formatar_br(np.percentile(arr_v,2.5))}, {formatar_br(np.percentile(arr_v,97.5))}] tCO₂eq**.  
+        - Coeficiente de variação: **{cv:.1f}%**.
         """)
 
-        # Testes de diferença significativa
         st.write("**Testes de diferença significativa (p-valores):**")
         t_vt = stats.ttest_rel(arr_v, arr_t)[1]
         t_vs = stats.ttest_rel(arr_v, arr_s)[1]
@@ -691,18 +586,11 @@ if st.session_state.get('run_simulation', False):
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown(f"<div class='test-stats'>**Vermi vs Termo**<br>t-test p = {t_vt:.5f}<br>Wilcoxon p = {w_vt:.5f}</div>", unsafe_allow_html=True)
+            st.markdown(f"**Vermi vs Termo**<br>t-test p = {t_vt:.5f}<br>Wilcoxon p = {w_vt:.5f}", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='test-stats'>**Vermi vs Std**<br>t-test p = {t_vs:.5f}<br>Wilcoxon p = {w_vs:.5f}</div>", unsafe_allow_html=True)
+            st.markdown(f"**Vermi vs Std**<br>t-test p = {t_vs:.5f}<br>Wilcoxon p = {w_vs:.5f}", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='test-stats'>**Termo vs Std**<br>t-test p = {t_ts:.5f}<br>Wilcoxon p = {w_ts:.5f}</div>", unsafe_allow_html=True)
-        
-        st.info("""
-        **✅ Interpretação estatística:**  
-        - Se **p < 0,05**, a diferença entre as tecnologias é estatisticamente significativa.  
-        - Neste caso, todas as comparações apresentam **p < 0,001**, indicando que as três tecnologias produzem resultados **muito diferentes entre si**.  
-        - O teste de Wilcoxon (não paramétrico) confirma a robustez da conclusão, mesmo sem assumir normalidade.
-        """)
+            st.markdown(f"**Termo vs Std**<br>t-test p = {t_ts:.5f}<br>Wilcoxon p = {w_ts:.5f}", unsafe_allow_html=True)
 
         st.subheader("📋 Resultados Anuais Detalhados")
         df_anual_fmt = df_anual[['Year','Base','Vermi','Termo','Std','Evitado_Vermi','Evitado_Termo','Evitado_Std']].copy()
@@ -711,13 +599,6 @@ if st.session_state.get('run_simulation', False):
             if col != 'Ano':
                 df_anual_fmt[col] = df_anual_fmt[col].apply(formatar_br)
         st.dataframe(df_anual_fmt)
-        
-        st.markdown("""
-        **📌 Nota final:**  
-        - Os valores anuais permitem ver a evolução ano a ano.  
-        - As emissões evitadas crescem rapidamente nos primeiros anos e depois estabilizam.  
-        - A escolha da tecnologia de compostagem impacta diretamente o potencial de geração de créditos de carbono.
-        """)
 
     st.session_state.run_simulation = False
 else:
@@ -727,20 +608,14 @@ st.markdown("---")
 with st.expander("📚 Referências Metodológicas Detalhadas"):
     st.markdown("""
     **1. Baseline – Aterro Sanitário (Guatapará, Ribeirão Preto)**  
-    - **Modelo de metano (CH₄) – IPCC 2006**: Método FOD, parâmetros MCF=1,0; F=0,5; OX=0,1; k=0,06 ou 0,40 ano⁻¹.  
-    - **DOC_f** – **Tabela 7 da UNFCCC A6.4‑AMT‑003 (2025)**: para resíduos altamente decomponíveis (alimentos, grama/podas) → 0,7.  
-    - **Emissões de N₂O – Wang et al. (2017)**: E_open = 1,91 mg m⁻² h⁻¹; E_closed = 2,15 mg m⁻² h⁻¹.  
-    - **Pré‑descarte – Feng et al. (2020)**: CH₄ = 2,78 μgC kg⁻¹ h⁻¹; N₂O total = 20,26 mg N kg⁻¹.  
-    - **Fator φ – UNFCCC A6.4‑AMT‑003 (2024)**: para clima úmido, φ = 0,85.  
-    - **f_y (captura de metano) – UNFCCC A6.4‑AMT‑003 (2025), Data/Parameter table 10**: definido pelo usuário (padrão conservador 0,0). Para Application B, deve ser monitorado anualmente.  
-    - **GWP – IPCC AR5 (UNFCCC A6.4‑AMT‑003)**: CH₄ = 28,0; N₂O = 265,0.
+    - **Modelo UNFCCC A6.4‑AMT‑003 (2025) – apenas CH₄**: MCF=1,0; F=0,5; **OX=0,383**; φ=0,85.  
+    - **DOC_f** fixo em 0,7 para resíduos altamente decomponíveis (Tabela 7 da norma).  
+    - **f_y (captura de metano)** conforme Data/Parameter table 10.  
+    - **N₂O e pré‑descarte NÃO são incluídos**, em conformidade com a metodologia.
 
     **2. Tecnologias de compostagem**  
-    - **Fatores padrão UNFCCC (AMS‑III.F / TOOL13)**: CH₄ = 0,002 t/t úmido; N₂O = 0,0002 t/t úmido.  
-    - **Fatores Yang et al. (2017)**: Vermicompostagem (CH₄ = 0,0013 t/tC; N₂O = 0,0092 t/tN); Termofílica (CH₄ = 0,0060 t/tC; N₂O = 0,0196 t/tN).  
+    - **Fatores padrão UNFCCC (AMS‑III.F / TOOL13)**: CH₄ = 0,002 t/t; N₂O = 0,0002 t/t.  
+    - **Fatores Yang et al. (2017)** para vermicompostagem e termofílica (apenas para comparação).  
 
-    **3. Análise de Incerteza**  
-    - A variável **`fy`** (captura de metano) foi incluída como parâmetro de incerteza nas análises de Sobol e Monte Carlo, com distribuição uniforme [0,0 – 0,8], substituindo a variabilidade do GWP (agora fixo).
-
-    **⚠️ Reprodutibilidade:** Seed fixa (50) e paralelização com joblib.
+    **3. GWP fixo IPCC AR5**: CH₄ = 28, N₂O = 265.
     """)
